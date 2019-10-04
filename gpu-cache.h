@@ -611,7 +611,7 @@ public:
     void init(char * config, FuncCache status)
     {
     	cache_status= status;
-        assert( config );
+        //assert( config );
         char ct, rp, wp, ap, mshr_type, wap, sif;
 
 
@@ -685,7 +685,6 @@ public:
         m_valid = true;
         m_atom_sz = (m_cache_type == SECTOR)? SECTOR_SIZE : m_line_sz;
         original_m_assoc = m_assoc;
-
         //For more details about difference between FETCH_ON_WRITE and WRITE VALIDAE policies
         //Read: Jouppi, Norman P. "Cache write policies and performance". ISCA 93.
         //WRITE_ALLOCATE is the old write policy in GPGPU-sim 3.x, that send WRITE and READ for every write request
@@ -866,6 +865,7 @@ protected:
     friend class baseline_cache;
     friend class read_only_cache;
     friend class tex_cache;
+    friend class tlb;
     friend class data_cache;
     friend class l1_cache;
     friend class l2_cache;
@@ -877,6 +877,13 @@ public:
 	l1d_cache_config() : cache_config(){}
 	virtual unsigned set_index(new_addr_type addr) const;
 	unsigned l1_latency;
+};
+
+class tlb_cache_config : public cache_config{
+public:
+	tlb_cache_config() : cache_config(){}
+	//virtual unsigned set_index(new_addr_type addr) const;
+	unsigned tlb_latency;
 };
 
 class l2_cache_config : public cache_config {
@@ -1411,7 +1418,7 @@ protected:
         void replenish_port_bandwidth(); 
 
         /// query for data port availability 
-        bool data_port_free() const; 
+        bool data_port_free() const ; 
         /// query for fill port availability 
         bool fill_port_free() const; 
     protected: 
@@ -1458,8 +1465,8 @@ public:
     virtual enum cache_request_status access( new_addr_type addr, mem_fetch *mf, unsigned time, std::list<cache_event> &events ) ;
     /// Sends next request to lower level of memory
     // accessors for cache bandwidth availability 
-    bool data_port_free()  const;
-    bool fill_port_free() const;
+    bool data_port_free()  const { return true; }
+    bool fill_port_free() const {return true ; }
     
     void cycle();
     /// Interface for response from lower memory level (model bandwidth restictions in caller)
@@ -1467,7 +1474,7 @@ public:
     /// Checks if mf is waiting to be filled by lower memory level
     bool waiting_for_fill( mem_fetch *mf );
     /// Pop next ready access (does not include accesses that "HIT")
-    mem_fetch *next_access(){return my_queue.next_access();}
+   // mem_fetch *next_access(){return my_queue.next_access();}
     // flash invalidate all entries in cache
     void flush(){m_tlb_array->flush();}
     void invalidate(){m_tlb_array->invalidate();}

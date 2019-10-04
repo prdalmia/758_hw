@@ -248,10 +248,6 @@ enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx, m
     return probe(addr, idx, mask, probe_mode, mf);
 }
 
-enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx, mem_fetch* mf, bool probe_mode) const {
-    return probe(addr, idx, mf, probe_mode);
-}
-
 enum cache_request_status tlb::access(new_addr_type addr, mem_fetch *mf, unsigned time, std::list<cache_event> &events ){
 
     m_tlb_array->access(addr, time, mf);
@@ -465,66 +461,6 @@ enum cache_request_status tag_array::access( new_addr_type addr, unsigned time, 
     return status;
 }
 
-enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time, evicted_block_info &evicted, mem_fetch* mf )
-{
-    m_access++;
-    is_used = true;
-    idx = unsigned(-1);
-    shader_cache_access_log(m_core_id, m_type_id, 0); // log accesses to cache
-    enum cache_request_status status = probe(addr,idx,mf);
-    mf->set_tlb(0);
-    switch (status) {
-    case HIT_RESERVED: 
-        m_pending_hit++;
-    case HIT: 
-        m_lines[idx]->set_last_access_time(time);
-        break;
-    case MISS:
-        m_miss++;
-        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
-        if ( m_config.m_alloc_policy == ON_MISS ) {
-            if( m_lines[idx]->is_modified_line()) {
-                evicted.set_info(m_lines[idx]->m_block_addr, m_lines[idx]->get_modified_size());
-            }
-            m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
-            mf->set_tlb(1);
-        }
-        break;
-    case RESERVATION_FAIL:
-        m_res_fail++;
-        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
-        break;
-    default:
-        fprintf( stderr, "tlb_array::access - Error: Unknown"
-            "cache_request_status %d\n", status );
-        abort();
-    }
-    return status;
-}
-
-void tlb_array::fill( new_addr_type addr, unsigned time, mem_fetch* mf)
-{
-    fill(addr, time);
-}
-
-void tlb_array::fill( new_addr_type addr, unsigned time)
-{
-    //assert( m_config.m_alloc_policy == ON_FILL );
-    unsigned idx;
-    enum cache_request_status status = probe(addr,idx);
-    //assert(status==MISS||status==SECTOR_MISS); // MSHR should have prevented redundant memory request
-    if(status==MISS)
-    	m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
-    }
-    m_lines[idx]->fill(time);
-}
-
-void tag_array::fill( unsigned index, unsigned time, mem_fetch* mf)
-{
-    assert( m_config.m_alloc_policy == ON_MISS );
-    m_lines[index]->fill(time, mf->get_access_sector_mask());
-}
-
 
 
 //Tag array
@@ -556,8 +492,6 @@ void tag_array::fill( unsigned index, unsigned time, mem_fetch* mf)
     assert( m_config.m_alloc_policy == ON_MISS );
     m_lines[index]->fill(time, mf->get_access_sector_mask());
 }
-
-
 //TODO: we need write back the flushed data to the upper level
 void tag_array::flush() 
 {
@@ -622,6 +556,53 @@ void tag_array::get_stats(unsigned &total_access, unsigned &total_misses, unsign
     total_hit_res   = m_pending_hit;
     total_res_fail  = m_res_fail;
 }
+
+
+enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time, evicted_block_info &evicted, mem_fetch* mf )
+{
+    m_access++;
+    is_used = true;
+    unsigned int idx = unsigned(-1);
+    shader_cache_access_log(m_core_id, m_type_id, 0); // log accesses to cache
+    enum cache_request_status status = probe(addr,idx,mf);
+    mf->set_tlb(0);
+    switch (status) {
+    case HIT_RESERVED: 
+        m_pending_hit++;
+    case HIT: 
+        m_lines[idx]->set_last_access_time(time);
+        break;
+    case MISS:
+        m_miss++;
+        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
+        if ( m_config.m_alloc_policy == ON_MISS ) {
+            if( m_lines[idx]->is_modified_line()) {
+                evicted.set_info(m_lines[idx]->m_block_addr, m_lines[idx]->get_modified_size());
+            }
+            m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
+            mf->set_tlb(1);
+        }
+        break;
+    case RESERVATION_FAIL:
+        m_res_fail++;
+        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
+        break;
+    default:
+        fprintf( stderr, "tlb_array::access - Error: Unknown"
+            "cache_request_status %d\n", status );
+        abort();
+    }
+    return status;
+}
+
+void tlb_array::fill( new_addr_type addr, unsigned time, mem_fetch* mf)
+{
+    //assert( m_config.m_alloc_policy == ON_FILL );
+    unsigned idx;
+    enum cache_request_status status = probe(addr,idx, mf);
+    //assert(status==MISS||status==SECTOR_MISS); // MSHR should have prevented redundant memory request
+}
+
 
 
 bool was_write_sent( const std::list<cache_event> &events )

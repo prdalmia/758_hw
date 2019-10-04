@@ -1639,8 +1639,6 @@ mem_stage_stall_type ldst_unit::process_memory_access_queue( cache_t *cache, war
     return process_cache_access( cache, mf->get_addr(), inst, events, mf, status );
 }
 
-
-
 mem_stage_stall_type ldst_unit::process_memory_access_queue_l1cache( l1_cache *cache, warp_inst_t &inst )
 {
     mem_stage_stall_type result = NO_RC_FAIL;
@@ -1682,20 +1680,6 @@ mem_stage_stall_type ldst_unit::process_memory_access_queue_l1cache( l1_cache *c
     }
 }
 
-void ldst_unit::tlb_latency_queue_cycle(){
-   
-   
-   
-   if((tlb_latency_queue[0]) != NULL)
-    {
-        //call fill_tlb
-    }
-    else
-    {
-        tlb_latency_queue.pop_front();
-    }
-
-}
 void ldst_unit::L1_latency_queue_cycle()
 {
 	//std::deque< std::pair<mem_fetch*,bool> >::iterator it = m_latency_queue.begin();
@@ -1755,14 +1739,6 @@ void ldst_unit::L1_latency_queue_cycle()
 		   l1_latency_queue[stage] = l1_latency_queue[stage+1] ;
 		   l1_latency_queue[stage+1] = NULL;
 	   }
-
-}
-
-void ldst_unit::tlb_latency_queue_cycle()
-
-{
-
-
 
 }
 
@@ -1861,22 +1837,27 @@ bool ldst_unit::tlb_cycle( warp_inst_t &inst, mem_stage_stall_type &stall_reason
     std::list<cache_event> events;
     enum cache_request_status status = m_tlb->access(mf->get_addr(), mf, gpu_sim_cycle+gpu_tot_sim_cycle, events);
 
-    if (status == HIT){
-        return 1;
-    }
-    else if (status == HIT_RESERVED)
-    {
-    new_addr_type mshr_addr = m_config->mshr_addr(mf->get_addr());
-    bool mshr_hit = tlb_mshrs.probe(mshr_addr);
-    bool mshr_avail = tlb_mshrs.full(mshr_addr);
-    if ( mshr_hit && mshr_avail ) {
-        m_mshrs.add(mshr_addr,mf);
+   //if (status == HIT){
+   //    return 1;
+   //}
+   //else if (status == HIT_RESERVED)
+   //{
+   ////new_addr_type mshr_addr = m_config->mshr_addr(mf->get_addr());
+   ////bool mshr_hit = tlb_mshrs.probe(mshr_addr);
+   ////bool mshr_avail = tlb_mshrs.full(mshr_addr);
+   ////if ( mshr_hit && mshr_avail ) {
+   ////    m_mshrs.add(mshr_addr,mf);
+//
+   ////} else if ( !mshr_hit && mshr_avail) {
+   ////    m_mshrs.add(mshr_addr,mf);
+	////	}
+   ////}
+   // }
+   //else{
 
-    } else if ( !mshr_hit && mshr_avail) {
-        m_mshrs.add(mshr_addr,mf);
-		}
-    }
-}
+   //}
+
+   return true;
 }
 
 
@@ -1891,9 +1872,9 @@ void ldst_unit::fill( mem_fetch *mf )
     m_response_fifo.push_back(mf);
 }
 
-void ldst_unit::fill_tlb( mem_fetch *mf , t)
+void ldst_unit::fill_tlb( mem_fetch *mf)
 {
-    m_tlb->fill(mf, time)
+    m_tlb->fill(mf, gpu_tot_sim_cycle+gpu_sim_cycle);
 }
 
 void ldst_unit::flush(){
@@ -2160,6 +2141,8 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
           tpc );
     if( !m_config->m_L1D_config.disabled() ) {
         char L1D_name[STRSIZE];
+        char tlb_name[STRSIZE];
+        enum mem_fetch_status status;
         snprintf(L1D_name, STRSIZE, "L1D_%03d", m_sid);
         m_L1D = new l1_cache( L1D_name,
                               m_config->m_L1D_config,
@@ -2169,12 +2152,12 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
                               m_mf_allocator,
                               IN_L1D_MISS_QUEUE );
         
-        m_tlb = new tlb( L1D_name,
-                              m_config->m_tlb_config,
+        m_tlb = new tlb( tlb_name,
+                              m_config->m_L1D_config,
                               m_sid,
                               get_shader_normal_cache_id(),
                               m_icnt,
-                              m_mf_allocator );
+                              status);
 
         if(m_config->m_L1D_config.l1_latency > 0)
 	    {
@@ -2182,9 +2165,10 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
         		l1_latency_queue.push_back((mem_fetch*)NULL);
 	    }
 
-        if(m_config->m_L1D_config.l1_latency > 0)
+        //if(20 > 0) tlb_latency_fix
+        
 	    {
-        	for(int i=0; i<m_config->m_L1D_config.l1_latency; i++ )
+        	for(int i=0; i<20; i++ )
         		tlb_latency_queue.push_back((mem_fetch*)NULL);
 	    }
     }
@@ -2392,7 +2376,6 @@ void ldst_unit::cycle()
                delete mf;
            } else {
                assert( !mf->get_is_write() ); // L1 cache is write evict, allocate line on load miss only
-               
                bool bypassL1D = false; 
                if ( CACHE_GLOBAL == mf->get_inst().cache_op || (m_L1D == NULL) ) {
                    bypassL1D = true; 
@@ -2417,35 +2400,36 @@ void ldst_unit::cycle()
    
    if( m_tlb ) {
 
+        if (tlb_latency_queue[0] != NULL)
+        {
+            fill_tlb(tlb_latency_queue[0]);
+        }
 
     if(mf->get_tlb() == 1 ){
 
-        if (tlb_latency_queue[0]) != NULL}
-        {
-            fill_tlb(tlb_latency_queue[0]))
-        }
         if((tlb_latency_queue[m_config->m_L1D_config.l1_latency-1]) == NULL)
     	 {
     		tlb_latency_queue[m_config->m_L1D_config.l1_latency-1] = mf;
          }
-    for(unsigned stage =0; stage<m_config->m_tlb_config.tlb_latency-1; ++stage)
+    for(unsigned stage =0; stage<20-1; ++stage){
         if(tlb_latency_queue[stage] == NULL) {
             tlb_latency_queue[stage] = tlb_latency_queue[stage+1];
             tlb_latency_queue[stage+1]= NULL;
         }
-   
+    }
    }
+   }
+}
 
-   m_L1T->cycle();
-   m_L1C->cycle();
+   
+m_L1T->cycle();
+m_L1C->cycle();
    if( m_L1D ) {
 	   m_L1D->cycle();
 	   if(m_config->m_L1D_config.l1_latency > 0)
 	   		L1_latency_queue_cycle();
    }
-   
-   }
-
+  
    warp_inst_t &pipe_reg = *m_dispatch_reg;
    enum mem_stage_stall_type rc_fail = NO_RC_FAIL;
    mem_stage_access_type type;
