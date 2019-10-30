@@ -104,101 +104,86 @@ const char * cache_request_status_str(enum cache_request_status status);
 struct tlb_block_t {
     tlb_block_t()
     {
-        m_tag=0;
-        m_block_addr=0;
+        m_alloc_time = 0;
+        m_fill_time = 0;
+		m_last_access_time = 0;
+		m_status = INVALID;
     }
 
-     void allocate( new_addr_type tag, new_addr_type block_addr, unsigned time){
-           m_tag=tag;
-	        m_block_addr=block_addr;
-	        m_alloc_time=time;
-	        m_last_access_time=time;
-	        m_fill_time=0;
-	        m_status=RESERVED;
-	        m_ignore_on_fill_status = false;
-	        m_set_modified_on_fill = false;
-     };
-     void fill( unsigned time){
-            m_status = m_set_modified_on_fill? MODIFIED : VALID;
 
+	void allocate(new_addr_type tag, new_addr_type block_addr, unsigned time)
+	{
+		m_tag = tag;
+		m_block_addr = block_addr;
+		m_alloc_time = time;
+		m_last_access_time = time;
+		m_fill_time = 0;
+		m_status = RESERVED;
+	}
+
+	void fill(unsigned time)
+	{
+	    	m_status =  VALID;
 	        m_fill_time=time;
-
-     };
-
-    bool is_invalid_line()
-	    {
-	    	return m_status == INVALID;
-	    }
-		 bool is_valid_line()
-	    {
-	    	 return m_status == VALID;
-	    }
-		 bool is_reserved_line()
-	    {
-	    	 return m_status == RESERVED;
-	    }
-		 bool is_modified_line()
-	    {
-	    	return m_status == MODIFIED;
-	    }
-
-		enum cache_block_state get_status()
-	    {
+	}
+	bool is_invalid_line()
+	{
+	  	return m_status == INVALID;
+	}
+	 bool is_valid_line()
+	{
+  		return m_status == VALID;
+	}
+	 bool is_reserved_line()
+	{
+	  	return m_status == RESERVED;
+	}
+	 bool is_modified_line()
+	{
+	  	return m_status == MODIFIED;
+	}
+	 enum cache_block_state get_status()
+	{
 	    	return m_status;
-	    }
-		void set_status(enum cache_block_state status)
-	    {
-	    	m_status = status;
-	    }
-		unsigned long long get_last_access_time()
-		{
-			return m_last_access_time;
-		}
-		 void set_last_access_time(unsigned long long time)
-	    {
+	}
+	 void set_status(enum cache_block_state status)
+	{
+		m_status = status;
+	}
+	 unsigned long long get_last_access_time()
+	{
+		return m_last_access_time;
+	}
+	 void set_last_access_time(unsigned long long time)
+	{
 	    	m_last_access_time = time;
-	    }
-		 unsigned long long get_alloc_time()
-	    {
-	    	return m_alloc_time;
-	    }
-		 void set_ignore_on_fill(bool m_ignore)
-		{
-			m_ignore_on_fill_status = m_ignore;
-		}
-		 void set_modified_on_fill(bool m_modified)
-		{
-	    	m_set_modified_on_fill = m_modified;
-		}
-		 unsigned  get_modified_size()
-		{
-			return SECTOR_CHUNCK_SIZE * SECTOR_SIZE;   //i.e. cache line size
-		}
-		 void set_m_readable(bool readable)
-		{
-			m_readable = readable;
-		}
-		 bool is_readable() {
-			return m_readable;
-		}
-		 void print_status() {
-			 printf("m_block_addr is %llu, status = %u\n", m_block_addr, m_status);
-		}
-     ~tlb_block_t() {}
+	}
+	 unsigned long long get_alloc_time()
+	{
+	  	return m_alloc_time;
+	}
 
+	 void print_status() {
+		 printf("m_block_addr is %llu, status = %u\n", m_block_addr, m_status);
+	}
 
-    new_addr_type    m_tag;
-    new_addr_type    m_block_addr;
+    	 void set_ignore_on_fill(bool m_ignore) {};
+    	 void set_modified_on_fill(bool m_modified) {};
+    	 unsigned get_modified_size() {};
 
-    private:
+    	 void set_m_readable(bool readable) {};
+    	 bool is_readable() {};
+   	 ~tlb_block_t() {}
+
+        new_addr_type    m_tag;
+        new_addr_type    m_block_addr;
+
+private:
+        
 	    unsigned long long     m_alloc_time;
 	    unsigned long long     m_last_access_time;
 	    unsigned long long     m_fill_time;
-	    cache_block_state    m_status;
-	    bool m_ignore_on_fill_status;
-	    bool m_set_modified_on_fill;
-	    bool m_readable;
-
+	    enum cache_block_state    	   m_status;
 };
 
 struct cache_block_t {
@@ -611,7 +596,7 @@ public:
     void init(char * config, FuncCache status)
     {
     	cache_status= status;
-        //assert( config );
+        assert( config );
         char ct, rp, wp, ap, mshr_type, wap, sif;
 
 
@@ -872,20 +857,70 @@ protected:
     friend class memory_sub_partition;
 };
 
+
+
+class tlb_cache_config : public cache_config{
+public:
+	tlb_cache_config() : cache_config(){
+        m_valid = false; 
+        m_disabled = false;
+        m_config_string = NULL; // set by option parser
+        m_config_stringPrefL1 = NULL;
+        m_config_stringPrefShared = NULL;
+        m_data_port_width = 0;
+        m_set_index_function = LINEAR_SET_FUNCTION;
+        m_is_streaming = false;
+	m_line_sz = 0;
+	m_nset = 0;
+	m_assoc = 0;
+	}
+	//virtual unsigned set_index(new_addr_type addr) const;
+    	void init(char * config, FuncCache status)
+    	{
+		cache_status= status;
+        assert( config );
+        char rp, ap;
+
+
+        int ntok = sscanf(config,"%u:%u:%u:%c:%c",
+                          &m_nset, &m_line_sz, &m_assoc, &rp, &ap);
+
+        if ( ntok < 5 ) {
+            if ( !strcmp(config,"none") ) {
+                m_disabled = true;
+                return;
+            }
+            exit_parse_error();
+        }
+
+        switch (rp) {
+               case 'L': m_replacement_policy = LRU; break;
+               case 'F': m_replacement_policy = FIFO; break;
+               default: exit_parse_error();
+        }
+        switch (ap) {
+        case 'm': m_alloc_policy = ON_MISS; break;
+        case 'f': m_alloc_policy = ON_FILL; break;
+        case 's': m_alloc_policy = STREAMING; break;
+        default: exit_parse_error();
+        }
+        
+        m_line_sz_log2 = LOGB2(m_line_sz);
+        m_nset_log2 = LOGB2(m_nset);
+        m_valid = true;
+        m_atom_sz = (m_cache_type == SECTOR)? SECTOR_SIZE : m_line_sz;
+        original_m_assoc = m_assoc;
+	     tlb_latency = 20;
+  
+	}
+    unsigned tlb_latency;
+};
 class l1d_cache_config : public cache_config{
 public:
 	l1d_cache_config() : cache_config(){}
 	virtual unsigned set_index(new_addr_type addr) const;
 	unsigned l1_latency;
 };
-
-class tlb_cache_config : public cache_config{
-public:
-	tlb_cache_config() : cache_config(){}
-	//virtual unsigned set_index(new_addr_type addr) const;
-	unsigned tlb_latency;
-};
-
 class l2_cache_config : public cache_config {
 public:
 	l2_cache_config() : cache_config(){}
@@ -964,10 +999,11 @@ protected:
 class tlb_array {
 public:
     // Use this constructor
-    tlb_array(cache_config &config, int core_id, int type_id );
+    tlb_array(tlb_cache_config &config, int core_id, tlb_block_t** new_lines );
     ~tlb_array();
 
     enum cache_request_status probe( new_addr_type addr, unsigned &idx, mem_fetch* mf, bool probe_mode=false ) const;
+    enum cache_request_status probe( new_addr_type addr, unsigned &idx, bool probe_mode=false, mem_fetch* mf=NULL) const;
     enum cache_request_status access( new_addr_type addr, unsigned time, mem_fetch* mf );
     enum cache_request_status access( new_addr_type addr, unsigned time,  evicted_block_info &evicted, mem_fetch* mf );
 
@@ -981,6 +1017,7 @@ public:
     void flush(); // flush all written entries
     void invalidate(); // invalidate all entries
     void new_window();
+    void init(int core_id);
 
     void print( FILE *stream, unsigned &total_access, unsigned &total_misses ) const;
     float windowed_miss_rate( ) const;
@@ -993,7 +1030,7 @@ public:
 protected:
 
 
-    cache_config &m_config;
+    tlb_cache_config &m_config;
 
     tlb_block_t **m_lines; /* nbanks  x nset x assoc lines in total */
 
@@ -1008,7 +1045,6 @@ protected:
     unsigned m_prev_snapshot_pending_hit;
 
     int m_core_id; // which shader core is using this
-    int m_type_id; // what kind of cache is this (normal, texture, constant)
 
     bool is_used;  //a flag if the whole cache has ever been accessed before
 
@@ -1450,10 +1486,17 @@ protected:
 /// Read only cache
 class tlb : public cache_t {
 public:
-    tlb( const char *name, cache_config &config, int core_id, int type_id, mem_fetch_interface *memport, enum mem_fetch_status status )
-    : m_config(config), m_tlb_array(new tlb_array(config,core_id,type_id))
+    tlb( const char *name, tlb_cache_config &config, int core_id, tlb_block_t **new_lines )
+    : m_config(config), m_tlb_array(new tlb_array(config,core_id, new_lines ))
     {
-        //TODO: write constructor
+        init(name, config, core_id);
+    }
+
+    void init(const char *name, const tlb_cache_config &config, int core_id)
+
+    {
+        m_name = name;
+
     }
 
 
@@ -1462,29 +1505,46 @@ public:
         delete m_tlb_array;
     }
 
-    virtual enum cache_request_status access( new_addr_type addr, mem_fetch *mf, unsigned time, std::list<cache_event> &events ) ;
+    void update_cache_parameters(tlb_cache_config &config)
+    {
+    	m_config=config;
+    	m_tlb_array->update_cache_parameters(config);
+    }
+    enum cache_request_status access( new_addr_type addr, mem_fetch *mf, unsigned time, std::list<cache_event> &events ) 
+    {
+        m_tlb_array->access(addr, time, mf);
+    }
     /// Sends next request to lower level of memory
     // accessors for cache bandwidth availability 
-    bool data_port_free()  const { return true; }
-    bool fill_port_free() const {return true ; }
+    virtual bool data_port_free() const {}; 
+    virtual bool fill_port_free() const {};
     
     void cycle();
     /// Interface for response from lower memory level (model bandwidth restictions in caller)
-    void fill( mem_fetch *mf, unsigned time );
+    void fill( mem_fetch *mf, unsigned time )
+    {
+        m_tlb_array->fill(mf->get_addr(), time, mf);
+    }
     /// Checks if mf is waiting to be filled by lower memory level
-    bool waiting_for_fill( mem_fetch *mf );
+    bool waiting_for_fill( mem_fetch *mf )
+    {
+        
+    }
     /// Pop next ready access (does not include accesses that "HIT")
    // mem_fetch *next_access(){return my_queue.next_access();}
     // flash invalidate all entries in cache
     void flush(){m_tlb_array->flush();}
     void invalidate(){m_tlb_array->invalidate();}
-    void print(FILE *fp, unsigned &accesses, unsigned &misses) const;
-    void display_state( FILE *fp ) const;
+    void print(FILE *fp, unsigned &accesses, unsigned &misses) const
+    {
+        printf("stats");
+    }
 
 protected:
-    
-    cache_config &m_config;
+    const char* m_name;
+    tlb_cache_config &m_config;
     tlb_array*  m_tlb_array;
+    cache_stats m_stats;
 };
 
 /// Data cache - Implements common functions for L1 and L2 data cache

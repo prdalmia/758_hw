@@ -162,13 +162,6 @@ unsigned l2_cache_config::set_index(new_addr_type addr) const{
 	}
 }
 
-tag_array::~tag_array() 
-{
-	unsigned cache_lines_num = m_config.get_max_num_lines();
-	for(unsigned i=0; i<cache_lines_num; ++i)
-		delete m_lines[i];
-    delete[] m_lines;
-}
 
 tag_array::tag_array( cache_config &config,
                       int core_id,
@@ -243,18 +236,44 @@ void tag_array::remove_pending_line(mem_fetch *mf){
 	}
 }
 
-enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx, mem_fetch* mf, bool probe_mode) const {
-    mem_access_sector_mask_t mask = mf->get_access_sector_mask();
-    return probe(addr, idx, mask, probe_mode, mf);
+
+//TLB FUNCTIONS
+
+tlb_array::tlb_array( tlb_cache_config &config, int core_id, tlb_block_t** new_lines)
+    :m_config( config ), m_lines( new_lines )
+{
+    init(core_id);
 }
 
-enum cache_request_status tlb::access(new_addr_type addr, mem_fetch *mf, unsigned time, std::list<cache_event> &events ){
-
-    m_tlb_array->access(addr, time, mf);
+tlb_array::~tlb_array() 
+{
+	unsigned cache_lines_num = m_config.get_max_num_lines();
+	for(unsigned i=0; i<cache_lines_num; ++i)
+		delete m_lines[i];
+    delete[] m_lines;
 }
 
-enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx,   mem_fetch* mf, bool probe_mode) const {
-    //assert( m_config.m_write_policy == READ_ONLY );
+void tlb_array::init( int core_id)
+{
+    m_access = 0;
+    m_miss = 0;
+    m_pending_hit = 0;
+    m_res_fail = 0;
+    // initialize snapshot counters for visualizer
+    m_prev_snapshot_access = 0;
+    m_prev_snapshot_miss = 0;
+    m_prev_snapshot_pending_hit = 0;
+    m_core_id = core_id; 
+    is_used = false;
+}
+
+enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx, mem_fetch* mf, bool probe_mode) const {
+
+	probe(addr, idx);
+
+}
+
+enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx , bool probe_mode, mem_fetch* mf) const {
     unsigned set_index = m_config.set_index(addr);
     new_addr_type tag = m_config.tag(addr);
 
@@ -263,7 +282,6 @@ enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx,  
     unsigned long long valid_timestamp = (unsigned)-1;
 
     bool all_reserved = true;
-
     // check for hit or pending hit
     for (unsigned way=0; way<m_config.m_assoc; way++) {
         unsigned index = set_index*m_config.m_assoc+way;
@@ -275,11 +293,6 @@ enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx,  
             } else if ( line->get_status() == VALID ) {
                 idx = index;
                 return HIT;
-            } else if ( line->get_status() == MODIFIED) {
-            	if(line->is_readable()) {
-					idx = index;
-					return HIT;
-            	}
             }else {
                 assert( line->get_status() == INVALID );
             }
@@ -303,9 +316,9 @@ enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx,  
                 }
             }
         }
+    
     }
-    if ( all_reserved ) {
-        assert( m_config.m_alloc_policy == ON_MISS ); 
+    if ( all_reserved ) { 
         return RESERVATION_FAIL; // miss and not enough space in cache to allocate on miss
     }
 
@@ -315,7 +328,84 @@ enum cache_request_status tlb_array::probe( new_addr_type addr, unsigned &idx,  
         idx = valid_line;
     } else abort(); // if an unreserved block exists, it is either invalid or replaceable 
 
+
+    return MISS;
+
 }
+
+enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time,mem_fetch* mf)
+{
+    //bool wb=false;
+    evicted_block_info evicted;
+    enum cache_request_status result = access(addr,time,evicted,mf);
+    //assert(!wb);
+    return result;
+}
+
+enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time, evicted_block_info &evicted, mem_fetch* mf )
+{
+    m_access++;
+    mf->set_tlb(0);
+    is_used = true;
+    unsigned idx = unsigned(-1);
+    bool wb;
+    //shader_cache_access_log(m_core_id, m_type_id, 0); // log accesses to cache
+    enum cache_request_status status = probe(addr,idx,mf);
+    switch (status) {
+    case HIT_RESERVED: 
+        m_pending_hit++;
+    case HIT: 
+        m_lines[idx]->set_last_access_time(time);
+        break;
+    case MISS:
+        m_miss++;
+        //shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
+        if ( m_config.m_alloc_policy == ON_MISS ) {
+            if( m_lines[idx]->is_modified_line()) {
+                wb = true;
+                evicted.set_info(m_lines[idx]->m_block_addr, m_lines[idx]->get_modified_size());
+            }
+            m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
+	    mf->set_tlb(1);
+        }
+        break;
+    case RESERVATION_FAIL:
+        m_res_fail++;
+        break;
+    default:
+        fprintf( stderr, "tlb_array::access - Error: Unknown"
+            "cache_request_status %d\n", status );
+        abort();
+    }
+    return status;
+}
+
+void tlb_array::fill( new_addr_type addr, unsigned time, mem_fetch* mf)
+{
+    fill(addr, time);
+}
+
+void tlb_array::fill( new_addr_type addr, unsigned time)
+{
+    //assert( m_config.m_alloc_policy == ON_FILL );
+    unsigned idx = unsigned(-1);
+    enum cache_request_status status = probe(addr,idx);
+    //assert(status==MISS||status==SECTOR_MISS); // MSHR should have prevented redundant memory request
+    if(status==MISS)
+    	m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
+    if (status != RESERVATION_FAIL)
+    {
+        m_lines[idx]->fill(time);
+    }   
+}
+
+//TLB FUNCTIONS
+
+enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx, mem_fetch* mf, bool probe_mode) const {
+    mem_access_sector_mask_t mask = mf->get_access_sector_mask();
+    return probe(addr, idx, mask, probe_mode, mf);
+}
+
 
 enum cache_request_status tag_array::probe( new_addr_type addr, unsigned &idx, mem_access_sector_mask_t mask, bool probe_mode, mem_fetch* mf) const {
     //assert( m_config.m_write_policy == READ_ONLY );
@@ -405,15 +495,6 @@ enum cache_request_status tag_array::access( new_addr_type addr, unsigned time, 
     bool wb=false;
     evicted_block_info evicted;
     enum cache_request_status result = access(addr,time,idx,wb,evicted,mf);
-    assert(!wb);
-    return result;
-}
-
-enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time, mem_fetch* mf)
-{
-    bool wb=false;
-    evicted_block_info evicted;
-    enum cache_request_status result = access(addr,time, evicted,mf);
     assert(!wb);
     return result;
 }
@@ -556,53 +637,6 @@ void tag_array::get_stats(unsigned &total_access, unsigned &total_misses, unsign
     total_hit_res   = m_pending_hit;
     total_res_fail  = m_res_fail;
 }
-
-
-enum cache_request_status tlb_array::access( new_addr_type addr, unsigned time, evicted_block_info &evicted, mem_fetch* mf )
-{
-    m_access++;
-    is_used = true;
-    unsigned int idx = unsigned(-1);
-    shader_cache_access_log(m_core_id, m_type_id, 0); // log accesses to cache
-    enum cache_request_status status = probe(addr,idx,mf);
-    mf->set_tlb(0);
-    switch (status) {
-    case HIT_RESERVED: 
-        m_pending_hit++;
-    case HIT: 
-        m_lines[idx]->set_last_access_time(time);
-        break;
-    case MISS:
-        m_miss++;
-        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
-        if ( m_config.m_alloc_policy == ON_MISS ) {
-            if( m_lines[idx]->is_modified_line()) {
-                evicted.set_info(m_lines[idx]->m_block_addr, m_lines[idx]->get_modified_size());
-            }
-            m_lines[idx]->allocate( m_config.tag(addr), m_config.block_addr(addr), time);
-            mf->set_tlb(1);
-        }
-        break;
-    case RESERVATION_FAIL:
-        m_res_fail++;
-        shader_cache_access_log(m_core_id, m_type_id, 1); // log cache misses
-        break;
-    default:
-        fprintf( stderr, "tlb_array::access - Error: Unknown"
-            "cache_request_status %d\n", status );
-        abort();
-    }
-    return status;
-}
-
-void tlb_array::fill( new_addr_type addr, unsigned time, mem_fetch* mf)
-{
-    //assert( m_config.m_alloc_policy == ON_FILL );
-    unsigned idx;
-    enum cache_request_status status = probe(addr,idx, mf);
-    //assert(status==MISS||status==SECTOR_MISS); // MSHR should have prevented redundant memory request
-}
-
 
 
 bool was_write_sent( const std::list<cache_event> &events )

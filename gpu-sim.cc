@@ -257,6 +257,13 @@ void shader_core_config::reg_options(class OptionParser * opp)
     option_parser_register(opp, "-l1_latency", OPT_UINT32, &m_L1D_config.l1_latency,
                  "L1 Hit Latency",
                  "0");
+    option_parser_register(opp, "-gpgpu_cache:tlb", OPT_CSTR, &m_tlb_config.m_config_string,
+                   "per-shader tlb config "
+                   " {<nsets>:<bsize>:<assoc>:<wr>:<alloc> | none}",
+                   "1:8:128:L:m" );
+    option_parser_register(opp, "-tlb_latency", OPT_UINT32, &m_tlb_config.tlb_latency,
+                 "TLB Latency",
+                 "20");
     option_parser_register(opp, "-smem_latency", OPT_UINT32, &smem_latency,
                  "smem Latency",
                  "3");
@@ -1062,7 +1069,7 @@ void gpgpu_sim::change_cache_config(FuncCache cache_config)
 	switch(cache_config){
 	case FuncCachePreferNone:
 		m_shader_config->m_L1D_config.init(m_shader_config->m_L1D_config.m_config_string, FuncCachePreferNone);
-		m_shader_config->gpgpu_shmem_size=m_shader_config->gpgpu_shmem_sizeDefault;
+      m_shader_config->gpgpu_shmem_size=m_shader_config->gpgpu_shmem_sizeDefault;
 		break;
 	case FuncCachePreferL1:
 		if((m_shader_config->m_L1D_config.m_config_stringPrefL1 == NULL) || (m_shader_config->gpgpu_shmem_sizePrefL1 == (unsigned)-1))

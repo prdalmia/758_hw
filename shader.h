@@ -1227,7 +1227,6 @@ public:
     virtual void cycle();
      
     void fill( mem_fetch *mf );
-    void fill_tlb( mem_fetch *mf );
     void flush();
     void invalidate();
     void writeback();
@@ -1332,6 +1331,7 @@ protected:
    std::deque<mem_fetch* > l1_latency_queue;
    std::deque<mem_fetch* > tlb_latency_queue;
    void L1_latency_queue_cycle();
+   void tlb_latency_queue_cycle();
 };
 
 enum pipeline_stage_name_t {
@@ -1419,6 +1419,7 @@ struct shader_core_config : public core_config
         m_L1T_config.init(m_L1T_config.m_config_string,FuncCachePreferNone);
         m_L1C_config.init(m_L1C_config.m_config_string,FuncCachePreferNone);
         m_L1D_config.init(m_L1D_config.m_config_string,FuncCachePreferNone);
+        m_tlb_config.init(m_tlb_config.m_config_string,FuncCachePreferNone);
         gpgpu_cache_texl1_linesize = m_L1T_config.get_line_sz();
         gpgpu_cache_constl1_linesize = m_L1C_config.get_line_sz();
         m_valid = true;
@@ -1452,7 +1453,7 @@ struct shader_core_config : public core_config
     mutable cache_config m_L1T_config;
     mutable cache_config m_L1C_config;
     mutable l1d_cache_config m_L1D_config;
-    //mutable tlb_cache_config m_tlb_config;
+    mutable tlb_cache_config m_tlb_config;
 
     bool gpgpu_dwf_reg_bankconflict;
 
